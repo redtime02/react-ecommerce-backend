@@ -11,6 +11,7 @@ const { generateRefreshToken } = require("../config/refreshToken");
 const jwt = require("jsonwebtoken");
 const sendEmail = require("./emailCtrl");
 const crypto = require("crypto");
+const { log } = require("console");
 
 // Đăng ký
 const createUser = asyncHandler(async (req, res) => {
@@ -288,7 +289,7 @@ const forgotPasswordToken = asyncHandler(async (req, res) => {
   try {
     const token = await user.createPasswordResetToken();
     await user.save();
-    const resetURL = `Hi, Please follow this link to reset Your Password. This link is valid till 10 minutes from now. <a href='http://localhost:5000/api/user/reset-password/${token}'>Click Here</>`;
+    const resetURL = `Hi, Please follow this link to reset Your Password. This link is valid till 10 minutes from now. <a href='http://localhost:3000/reset-password/${token}'>Click Here</>`;
     const data = {
       to: email,
       text: "Hey User",
@@ -417,14 +418,51 @@ const updateProductQuantityFromCart = asyncHandler(async (req, res) => {
   }
 });
 
+const createOrder = asyncHandler(async (req, res) => {
+  const {
+    shippingInfo,
+    orderItems,
+    totalPrice,
+    totalPriceAfterDiscount,
+    paymentInfo,
+  } = req.body;
+  const { _id } = req.user;
+  try {
+    const order = await Order.create({
+      shippingInfo,
+      orderItems,
+      totalPrice,
+      totalPriceAfterDiscount,
+      paymentInfo,
+      user: _id,
+    });
+    res.json({
+      order,
+      success: true,
+    });
+    // let update = userCart.products.map((item) => {
+    //   return {
+    //     updateOne: {
+    //       filter: { _id: item.product._id },
+    //       update: { $inc: { quantity: -item.count, sold: +item.count } },
+    //     },
+    //   };
+    // });
+    // const updated = await Product.bulkWrite(update, {});
+  } catch (error) {
+    console.error("Error creating order:", error);
+  }
+});
+
 // Xóa giỏ hàng
 const emptyCart = asyncHandler(async (req, res) => {
   const { _id } = req.user;
   validateMongoDbId(_id);
   try {
-    const user = await User.findOne({ _id });
-    const cart = await Cart.findOneAndRemove({ orderby: user._id });
-    res.json(cart);
+    const deleteCart = await Cart.deleteMany({
+      userId: _id,
+    });
+    res.json(deleteCart);
   } catch (error) {
     throw new Error(error);
   }
@@ -452,52 +490,52 @@ const applyCoupon = asyncHandler(async (req, res) => {
   res.json(totalAfterDiscount);
 });
 
-// Tạo đơn hàng
-const createOrder = asyncHandler(async (req, res) => {
-  const { COD, couponApplied } = req.body;
-  const { _id } = req.user;
-  const user = await User.findById(_id);
-  try {
-    if (!COD) {
-      throw new Error("Tạo đơn hàng thất bại");
-    }
-    const user = await User.findById(_id);
-    let userCart = await Cart.findOne({ orderby: user._id });
-    let finalAmout = 0;
-    if (couponApplied && userCart.totalAfterDiscount) {
-      finalAmout = userCart.totalAfterDiscount;
-    } else {
-      finalAmout = userCart.cartTotal;
-    }
+// // Tạo đơn hàng
+// const createOrder = asyncHandler(async (req, res) => {
+//   const { COD, couponApplied } = req.body;
+//   const { _id } = req.user;
+//   const user = await User.findById(_id);
+//   try {
+//     if (!COD) {
+//       throw new Error("Tạo đơn hàng thất bại");
+//     }
+//     const user = await User.findById(_id);
+//     let userCart = await Cart.findOne({ orderby: user._id });
+//     let finalAmout = 0;
+//     if (couponApplied && userCart.totalAfterDiscount) {
+//       finalAmout = userCart.totalAfterDiscount;
+//     } else {
+//       finalAmout = userCart.cartTotal;
+//     }
 
-    let newOrder = await new Order({
-      products: userCart.products,
-      paymentIntent: {
-        id: uniqid(),
-        method: "COD",
-        amount: finalAmout,
-        status: "Cash on Delivery",
-        created: Date.now(),
-        currency: "VND",
-      },
-      orderby: user._id,
-      orderStatus: "Cash on Delivery",
-    }).save();
+//     let newOrder = await new Order({
+//       products: userCart.products,
+//       paymentIntent: {
+//         id: uniqid(),
+//         method: "COD",
+//         amount: finalAmout,
+//         status: "Cash on Delivery",
+//         created: Date.now(),
+//         currency: "VND",
+//       },
+//       orderby: user._id,
+//       orderStatus: "Cash on Delivery",
+//     }).save();
 
-    let update = userCart.products.map((item) => {
-      return {
-        updateOne: {
-          filter: { _id: item.product._id },
-          update: { $inc: { quantity: -item.count, sold: +item.count } },
-        },
-      };
-    });
-    const updated = await Product.bulkWrite(update, {});
-    res.json({ message: "success" });
-  } catch (error) {
-    throw new Error(error);
-  }
-});
+//     let update = userCart.products.map((item) => {
+//       return {
+//         updateOne: {
+//           filter: { _id: item.product._id },
+//           update: { $inc: { quantity: -item.count, sold: +item.count } },
+//         },
+//       };
+//     });
+//     const updated = await Product.bulkWrite(update, {});
+//     res.json({ message: "success" });
+//   } catch (error) {
+//     throw new Error(error);
+//   }
+// });
 
 // Lấy đơn hàng
 const getOrders = asyncHandler(async (req, res) => {
@@ -517,11 +555,34 @@ const getOrders = asyncHandler(async (req, res) => {
 // Lấy danh sách đơn hàng
 const getAllOrders = asyncHandler(async (req, res) => {
   try {
-    const allUserOrders = await Order.find()
-      .populate("products.product")
-      .populate("orderby")
-      .exec();
-    res.json(allUserOrders);
+    const orders = await Order.find().populate("user");
+    res.json({ orders });
+  } catch (error) {
+    throw new Error(error);
+  }
+});
+
+const getSingleOrder = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  console.log(id);
+  try {
+    const order = await Order.findOne({ _id: id })
+      .populate("orderItems.product")
+      .populate("orderItems.color");
+    res.json({ order });
+  } catch (error) {
+    throw new Error(error);
+  }
+});
+
+const updateOrder = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  console.log(id);
+  try {
+    const order = await Order.findById(id);
+    order.orderStatus = req.body.status;
+    await order.save();
+    res.json({ order });
   } catch (error) {
     throw new Error(error);
   }
@@ -563,6 +624,157 @@ const updateOrderStatus = asyncHandler(async (req, res) => {
   }
 });
 
+const getMyOrders = asyncHandler(async (req, res) => {
+  const { _id } = req.user;
+  try {
+    const orders = await Order.find({ user: _id })
+      .populate("user")
+      .populate("orderItems.product")
+      .populate("orderItems.color");
+    console.log(_id);
+    res.json({ orders });
+  } catch (error) {
+    throw new Error(error);
+  }
+});
+
+const getMonthWiseOrderIncome = asyncHandler(async (req, res) => {
+  let monthNames = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+  ];
+  let d = new Date();
+  let endDate = "";
+  d.setDate(1);
+  for (let index = 0; index < 11; index++) {
+    d.setMonth(d.getMonth() - 1);
+    endDate = monthNames[d.getMonth()] + " " + d.getFullYear();
+  }
+  const data = await Order.aggregate([
+    {
+      $match: {
+        createdAt: {
+          $lte: new Date(),
+          $gte: new Date(endDate),
+        },
+      },
+    },
+    {
+      $group: {
+        _id: {
+          month: "$month",
+        },
+        amount: {
+          $sum: "$totalPriceAfterDiscount",
+        },
+        count: {
+          $sum: 1,
+        },
+      },
+    },
+  ]);
+  res.json(data);
+});
+
+// const getMonthWiseOrderCount = asyncHandler(async (req, res) => {
+//   let monthNames = [
+//     "January",
+//     "February",
+//     "March",
+//     "April",
+//     "May",
+//     "June",
+//     "July",
+//     "August",
+//     "September",
+//     "October",
+//     "November",
+//     "December",
+//   ];
+//   let d = new Date();
+//   let endDate = "";
+//   d.setDate(1);
+//   for (let index = 0; index < 11; index++) {
+//     d.setMonth(d.getMonth() - 1);
+//     endDate = monthNames[d.getMonth()] + " " + d.getFullYear();
+//   }
+//   const data = await Order.aggregate([
+//     {
+//       $match: {
+//         createdAt: {
+//           $lte: new Date(),
+//           $gte: new Date(endDate),
+//         },
+//       },
+//     },
+//     {
+//       $group: {
+//         _id: {
+//           month: "$month",
+//         },
+//         count: {
+//           $sum: 1,
+//         },
+//       },
+//     },
+//   ]);
+//   res.json(data);
+// });
+
+const getYearlyTotalOrders = asyncHandler(async (req, res) => {
+  let monthNames = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+  ];
+  let d = new Date();
+  let endDate = "";
+  d.setDate(1);
+  for (let index = 0; index < 11; index++) {
+    d.setMonth(d.getMonth() - 1);
+    endDate = monthNames[d.getMonth()] + " " + d.getFullYear();
+  }
+  const data = await Order.aggregate([
+    {
+      $match: {
+        createdAt: {
+          $lte: new Date(),
+          $gte: new Date(endDate),
+        },
+      },
+    },
+    {
+      $group: {
+        _id: null,
+        count: {
+          $sum: 1,
+        },
+        amount: { $sum: "$totalPriceAfterDiscount" },
+      },
+    },
+  ]);
+  res.json(data);
+});
+
 module.exports = {
   createUser,
   loginUserCtrl,
@@ -591,4 +803,9 @@ module.exports = {
   getOrderByUserId,
   removeProductFromCart,
   updateProductQuantityFromCart,
+  getMyOrders,
+  getMonthWiseOrderIncome,
+  getYearlyTotalOrders,
+  getSingleOrder,
+  updateOrder,
 };
